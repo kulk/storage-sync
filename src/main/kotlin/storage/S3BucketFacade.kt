@@ -2,6 +2,7 @@ package storage
 
 import jakarta.annotation.PreDestroy
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Singleton
 import mu.KotlinLogging
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
@@ -11,10 +12,13 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.*
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 private val log = KotlinLogging.logger {}
 
-@ApplicationScoped
+@Singleton
 class S3BucketFacade : StorageFacade {
 
     @ConfigProperty(name = "aws.access.key")
@@ -75,25 +79,30 @@ class S3BucketFacade : StorageFacade {
     }
 
     override fun addFile(file: File): Boolean {
+//        val timestamp = Files.getLastModifiedTime(file.toPath()).toString()
+//        val metadata = mutableMapOf("lastModified" to timestamp)
+        log.info { "Uploading file to S3Bucket: ${file.path}" }
         try {
             val response = s3Client.putObject(
                 { request ->
                     request
                         .bucket(bucketName)
                         .key(file.path.toString())
-                        .ifNoneMatch("*")
+//                        .metadata(metadata)
+//                        .ifNoneMatch("*")
                 },
                 file.toPath()
             )
+            log.info { "Successfully uploaded file to S3 Bucket: ${file.path}" }
             return response.sdkHttpResponse().statusCode() == 200
 
         } catch (exception: S3Exception) {
-            log.error { exception.awsErrorDetails() }
+            log.error { "Failed to upload file to S3 Bucket ${file.path}. Exception: ${exception.awsErrorDetails()}" }
             return false
         }
     }
 
-    override fun listFiles(): List<String> {
+    override fun listFiles(): Map<String, ZonedDateTime> {
         val listObjectsV2Request = ListObjectsV2Request.builder()
             .bucket(bucketName)
             .build()
@@ -102,10 +111,13 @@ class S3BucketFacade : StorageFacade {
         val contents = listObjectsV2Response.contents()
 
         log.info { "Number of objects in the bucket: " + contents.stream().count() }
-        return contents.map { x: S3Object? -> x.toString() }
+        return contents.associate {
+            it.key() to it.lastModified().toString().toAmsterdamZonedDateTime()
+        }
     }
 
     override fun deleteFile(file: File): Boolean {
+        log.info { "Deleting file from S3 Bucket: ${file.path}"}
         val objectToDelete = ObjectIdentifier
             .builder()
             .key(file.name.toString())
@@ -119,10 +131,11 @@ class S3BucketFacade : StorageFacade {
                             .objects(objectToDelete)
                     }
             }
+            log.info { "File has been deleted: ${file.path}" }
             return response.sdkHttpResponse().statusCode() == 200
 
         } catch (exception: S3Exception) {
-            log.error { exception.awsErrorDetails() }
+            log.error { "Could not delete file: ${file.path}. Exception: ${exception.awsErrorDetails()}" }
             return false
         }
     }
@@ -141,3 +154,6 @@ class S3BucketFacade : StorageFacade {
     }
 
 }
+
+fun String.toAmsterdamZonedDateTime(): ZonedDateTime =
+    Instant.parse(this).atZone(ZoneId.of("Europe/Amsterdam"))

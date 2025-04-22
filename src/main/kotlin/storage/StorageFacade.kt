@@ -1,6 +1,7 @@
 package storage
 
 import java.io.File
+import java.time.ZonedDateTime
 
 interface StorageFacade {
 
@@ -12,7 +13,7 @@ interface StorageFacade {
 
     fun addFile(file: File): Boolean
 
-    fun listFiles(): List<String>
+    fun listFiles(): Map<String, ZonedDateTime>
 
     fun deleteFile(file: File): Boolean
 
